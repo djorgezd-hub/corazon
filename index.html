@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Corazón · Te amo · Galaxia</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap" rel="stylesheet">
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #02030a;
+    font-family: 'Dancing Script', cursive;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+  canvas { display: block; touch-action: none; }
+
+  /* Viñeta suave en las esquinas */
+  #vineta {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    background: radial-gradient(circle at 50% 47%,
+                rgba(0,0,0,0) 40%,
+                rgba(0,0,0,0.30) 72%,
+                rgba(0,0,0,0.70) 100%);
+  }
+
+  /* Pista "Tócalo ❤" */
+  #pista {
+    position: fixed; left: 50%; bottom: 6%;
+    transform: translateX(-50%);
+    font-size: clamp(18px, 3vw, 28px);
+    color: #e9c3cc;
+    opacity: .7;
+    letter-spacing: 1px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 20;
+    text-shadow: 0 1px 10px rgba(0,0,0,.6);
+    animation: pulso 2.2s ease-in-out infinite;
+    transition: opacity .8s ease;
+  }
+  #pista.oculto { opacity: 0; animation: none; }
+  @keyframes pulso { 0%,100% { opacity: .35; } 50% { opacity: .80; } }
+</style>
+</head>
+<body>
+
+  <div id="vineta"></div>
+  <div id="pista">Tócalo ❤</div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+  import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+
+  /* =================================================================================
+     CONFIGURACIÓN  —  personaliza aquí todo
+  ================================================================================= */
+  const CONFIG = {
+    // ===== Texto (las letras las forman las partículas del corazón) =====
+    TEXTO_FINAL:           'Te amo',   // <-- cambia esto por un nombre, etc.
+    TEXTO_ANCHO:           42,         // ancho total del texto en unidades 3D
+    MAX_TEXTO_PUNTOS:      28000,      // puntos objetivo máximos del texto
+    COLOR_TEXTO_A:         0xffd6e0,   // rosa claro cálido (izquierda)
+    COLOR_TEXTO_B:         0xff8fa8,   // rosa coral (derecha)
+
+    // ===== Corazón =====
+    PUNTOS_CORAZON:        35000,
+    PROPORCION_SUPERFICIE: 0.70,
+    GROSOR_CORAZON:        7.0,
+    TAMANO_PUNTO:          0.30,
+    RADIO_HOVER:           24,
+
+    // ===== Colores del corazón (sRGB) =====
+    COL_BASE_A:  0xb3122e,
+    COL_BASE_B:  0xd81b3c,
+    COL_SOMBRA:  0x6e0a1e,
+    COL_CORAL:   0xff5c7a,
+    COL_GLINT:   0xffc2cf,
+    LUZ_DIR:     new THREE.Vector3(-0.55, 0.75, 0.55).normalize(),
+
+    // ===== Galaxia =====
+    PUNTOS_GALAXIA:        40000,
+    BRAZOS:                4,
+    RADIO_GALAXIA:         120,
+    GROSOR_GALAXIA:        6,
+    GIRO_GALAXIA:          0.02,
+    GALAXIA_POS:           new THREE.Vector3(46, -12, -80),
+    GALAXIA_INCLINACION:   62,
+    GAL_STOPS: [
+      [0.00, 0xffd9a0],
+      [0.30, 0xc026d3],
+      [0.62, 0x7c3aed],
+      [1.00, 0x1e3a8a]
+    ],
+
+    // ===== Estrellas =====
+    ESTRELLAS:             3000,
+    ESTRELLAS_BRILLANTES:  25,
+    NEBULOSAS:             4,
+    METEORO_MIN:           4.0,
+    METEORO_MAX:           8.0,
+
+    // ===== Animación continua del corazón =====
+    VELOCIDAD_ROTACION:    0.5,
+    LATIDO_PERIODO:        1.3,
+    LATIDO_AMPLITUD:       0.08,
+    AMPLITUD_FLOTAR:       0.6,
+    INCLINACION_X:         0.06,
+
+    // ===== Tap / arrastre (distinguir un toque de un giro) =====
+    TAP_MAX_MOVIMIENTO:        8,      // px (mouse): por debajo de esto es un tap
+    TAP_MAX_MOVIMIENTO_TACTIL: 12,     // px (pantallas táctiles)
+    TAP_MAX_DURACION:          350,    // ms: duración máxima de un tap
+    REANUDAR_GIRO_MS:          1500,   // ms antes de reanudar el giro automático
+
+    // ===== Fases de la interacción (segundos) =====
+    F_APLASTAR:            0.15,
+    F_ESTALLIDO:           0.45,
+    F_A_TEXTO:             1.60,
+    F_MANTENER:            3.00,
+    F_A_CORAZON:           1.60,
+
+    // ===== Explosión / morph =====
+    EXPLOSION_FUERZA:      10,
+    EXPLOSION_CAOS:        6,
+    SWIRL:                 6,
+
+    // ===== Bloom =====
+    BLOOM_FUERZA:          0.35,
+    BLOOM_TEXTO:           0.12,
+    BLOOM_RADIO:           0.5,
+    BLOOM_UMBRAL:          0.85,
+
+    // ===== Mini corazones =====
+    MINI_CORAZONES:        25
+  };
+
+  /* =================================================================================
+     UTILIDADES
+  ================================================================================= */
+  const clamp = THREE.MathUtils.clamp;
+  const lerp  = THREE.MathUtils.lerp;
+  const deg2rad = THREE.MathUtils.degToRad;
+
+  function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+  function easeOutElastic(x) {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    const c4 = (2 * Math.PI) / 3;
+    return Math.pow(2, -10 * x) * Math.sin((x * 10 - 0.75) * c4) + 1;
+  }
+  function smoothstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+
+  /* =================================================================================
+     TEXTURAS GENERADAS CON CANVAS
+  ================================================================================= */
+  function texturaPunto(suavidad) {
+    const s = 64, c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    if (suavidad) {
+      grd.addColorStop(0.00, 'rgba(255,255,255,0.85)');
+      grd.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+      grd.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+    } else {
+      grd.addColorStop(0.00, 'rgba(255,255,255,1.00)');
+      grd.addColorStop(0.55, 'rgba(255,255,255,0.85)');
+      grd.addColorStop(0.80, 'rgba(255,255,255,0.25)');
+      grd.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+    }
+    g.fillStyle = grd;
+    g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function texturaFondo() {
+    const w = 1024, h = 1024, c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    const grd = g.createRadialGradient(w*0.5, h*0.48, 0, w*0.5, h*0.48, Math.hypot(w, h) * 0.62);
+    grd.addColorStop(0.00, '#0a0418');
+    grd.addColorStop(0.35, '#0d0620');
+    grd.addColorStop(0.70, '#060210');
+    grd.addColorStop(1.00, '#02030a');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, w, h);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function texturaGlow() {
+    const s = 128, c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    const core = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    core.addColorStop(0.00, 'rgba(255,255,255,1.00)');
+    core.addColorStop(0.16, 'rgba(255,255,255,0.75)');
+    core.addColorStop(0.42, 'rgba(255,255,255,0.16)');
+    core.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+    g.fillStyle = core;
+    g.fillRect(0, 0, s, s);
+    g.globalCompositeOperation = 'lighter';
+    g.translate(s/2, s/2);
+    for (const ang of [0, 90, 180, 270]) {
+      g.save();
+      g.rotate(ang * Math.PI / 180);
+      const len = s / 2;
+      const lg = g.createLinearGradient(0, 0, len, 0);
+      lg.addColorStop(0.0, 'rgba(255,255,255,0.55)');
+      lg.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+      lg.addColorStop(1.0, 'rgba(255,255,255,0.00)');
+      g.fillStyle = lg;
+      g.fillRect(0, -1.1, len, 2.2);
+      g.restore();
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function texturaNebulosa() {
+    const s = 256, c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    for (let k = 0; k < 70; k++) {
+      const x = Math.random() * s, y = Math.random() * s, r = 8 + Math.random() * 55;
+      const a = 0.03 + Math.random() * 0.10;
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, 'rgba(255,255,255,' + a + ')');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grd;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    g.globalCompositeOperation = 'destination-in';
+    const mask = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+    mask.addColorStop(0.0, 'rgba(255,255,255,1)');
+    mask.addColorStop(0.7, 'rgba(255,255,255,0.55)');
+    mask.addColorStop(1.0, 'rgba(255,255,255,0)');
+    g.fillStyle = mask;
+    g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  function texturaCorazonSuave() {
+    const s = 128, c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    const x = s / 2, y = s / 2;
+    g.filter = 'blur(4px)';
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.moveTo(x, y + 0.30 * s);
+    g.bezierCurveTo(x + 0.56 * s, y - 0.14 * s, x + 0.18 * s, y - 0.56 * s, x, y - 0.16 * s);
+    g.bezierCurveTo(x - 0.18 * s, y - 0.56 * s, x - 0.56 * s, y - 0.14 * s, x, y + 0.30 * s);
+    g.fill();
+    g.filter = 'none';
+    const grd = g.createRadialGradient(x, y - 0.05*s, 0, x, y, 0.6*s);
+    grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grd.addColorStop(0.7, 'rgba(255,255,255,0.55)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = grd;
+    g.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  /* =================================================================================
+     ESCENA, CÁMARA Y RENDER
+  ================================================================================= */
+  const escena = new THREE.Scene();
+  escena.background = texturaFondo();
+
+  const FOV = 50;
+  const camara = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.1, 4000);
+  camara.position.set(0, 1.5, 58);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.setClearColor(0x02030a, 1);
+  document.body.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camara, renderer.domElement);
+  controls.enableZoom = false;
+  controls.enablePan  = false;
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.rotateSpeed = 0.5;
+  controls.target.set(0, 0, 0);
+
+  const composer = new EffectComposer(renderer);
+  composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  composer.setSize(window.innerWidth, window.innerHeight);
+  composer.addPass(new RenderPass(escena, camara));
+
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    CONFIG.BLOOM_FUERZA, CONFIG.BLOOM_RADIO, CONFIG.BLOOM_UMBRAL
+  );
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+
+  const MOVIL = window.innerWidth < 820 || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const PUNTOS_GALAXIA = MOVIL ? Math.round(CONFIG.PUNTOS_GALAXIA / 2) : CONFIG.PUNTOS_GALAXIA;
+  const ESTRELLAS      = MOVIL ? Math.round(CONFIG.ESTRELLAS / 2) : CONFIG.ESTRELLAS;
+
+  // Ajusta la cámara (corazón completo) y la escala del texto (nunca se corta)
+  let uTextScale = 1;
+  function ajustarCamara() {
+    const w = window.innerWidth, h = window.innerHeight;
+    const aspect = w / h;
+    const tanHalf = Math.tan(deg2rad(FOV / 2));
+    const ANCHO_CORAZON = 33, ALTO_CORAZON = 24;
+    const zAncho = (ANCHO_CORAZON * 1.15) / (2 * tanHalf * aspect);
+    const zAlto  = (ALTO_CORAZON  * 1.15) / (2 * tanHalf);
+    const z = clamp(Math.max(zAncho, zAlto, 52), 52, 140);
+    camara.position.set(0, 1.5, z);
+    const anchoVisible = 2 * tanHalf * aspect * z;
+    uTextScale = clamp((anchoVisible * 0.90) / CONFIG.TEXTO_ANCHO, 0.45, 1.0);
+    controls.update();
+  }
+
+  /* =================================================================================
+     SHADER GENÉRICO DE PUNTOS (galaxia y estrellas: aditivo suave + twinkle)
+  ================================================================================= */
+  const puntoVert = [
+    'uniform float uTime;',
+    'uniform float uPixelRatio;',
+    'uniform float uTwinkle;',
+    'uniform float uBrillo;',
+    'uniform float uConstante;',
+    'attribute float aSize;',
+    'attribute float aPhase;',
+    'attribute vec3  aColor;',
+    'varying vec3  vColor;',
+    'varying float vAlpha;',
+    'void main() {',
+    '  float tw = 1.0 - uTwinkle * 0.5 + uTwinkle * 0.5 * sin(uTime * 1.7 + aPhase * 6.2831);',
+    '  vColor = aColor * uBrillo;',
+    '  vAlpha = 0.55 + 0.45 * tw;',
+    '  vec4 mv = modelViewMatrix * vec4(position, 1.0);',
+    '  gl_PointSize = aSize * uPixelRatio * (uConstante / max(0.001, -mv.z)) * (0.85 + 0.15 * tw);',
+    '  gl_Position = projectionMatrix * mv;',
+    '}'
+  ].join('\n');
+
+  const puntoFrag = [
+    'uniform sampler2D uTexture;',
+    'varying vec3  vColor;',
+    'varying float vAlpha;',
+    'void main() {',
+    '  float a = texture2D(uTexture, gl_PointCoord).a;',
+    '  if (a < 0.02) discard;',
+    '  gl_FragColor = vec4(vColor, a * vAlpha);',
+    '}'
+  ].join('\n');
+
+  function crearMaterialPuntos(twinkle, brillo) {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        uTime:       { value: 0 },
+        uPixelRatio: { value: renderer.getPixelRatio() },
+        uTexture:    { value: texturaPunto(false) },
+        uBrillo:     { value: brillo },
+        uTwinkle:    { value: twinkle },
+        uConstante:  { value: 300 }
+      },
+      vertexShader: puntoVert,
+      fragmentShader: puntoFrag,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+  }
+
+  const matGalaxia   = crearMaterialPuntos(0.15, 1.0);
+  const matEstrellas = crearMaterialPuntos(0.90, 1.0);
+
+  /* =================================================================================
+     GRUPO DE FONDO (parallax sutil)
+  ================================================================================= */
+  const grupoFondo = new THREE.Group();
+  escena.add(grupoFondo);
+
+  /* =================================================================================
+     GALAXIA ESPIRAL (4 brazos)
+  ================================================================================= */
+  const GAL_STOPS = CONFIG.GAL_STOPS.map(function (s) { return [s[0], new THREE.Color(s[1])]; });
+  const _gc = new THREE.Color();
+  function colorGalaxia(t) {
+    t = clamp(t, 0, 1);
+    for (let i = 0; i < GAL_STOPS.length - 1; i++) {
+      const a = GAL_STOPS[i], b = GAL_STOPS[i + 1];
+      if (t <= b[0]) {
+        const f = (t - a[0]) / ((b[0] - a[0]) || 1);
+        return _gc.copy(a[1]).lerp(b[1], f);
+      }
+    }
+    return _gc.copy(GAL_STOPS[GAL_STOPS.length - 1][1]);
+  }
+
+  const gPos = new Float32Array(PUNTOS_GALAXIA * 3);
+  const gCol = new Float32Array(PUNTOS_GALAXIA * 3);
+  const gSize = new Float32Array(PUNTOS_GALAXIA);
+  const gPhase = new Float32Array(PUNTOS_GALAXIA);
+  const R_GA = CONFIG.RADIO_GALAXIA;
+
+  for (let i = 0; i < PUNTOS_GALAXIA; i++) {
+    const i3 = i * 3;
+    const radius = Math.pow(Math.random(), 1.6) * R_GA;
+    const branch = i % CONFIG.BRAZOS;
+    const branchAngle = (branch / CONFIG.BRAZOS) * Math.PI * 2;
+    const angle = branchAngle + radius * 0.055;
+    const disp = radius * 0.13 + 1.5;
+    gPos[i3]   = Math.cos(angle) * radius + (Math.random() - 0.5) * 2 * disp;
+    gPos[i3+1] = (Math.random() - 0.5) * 2 * CONFIG.GROSOR_GALAXIA * (0.6 + radius / R_GA);
+    gPos[i3+2] = Math.sin(angle) * radius + (Math.random() - 0.5) * 2 * disp;
+    const c = colorGalaxia(radius / R_GA);
+    gCol[i3] = c.r; gCol[i3+1] = c.g; gCol[i3+2] = c.b;
+    gSize[i]  = 0.7 + Math.random() * 1.1;
+    gPhase[i] = Math.random();
+  }
+  const gGeo = new THREE.BufferGeometry();
+  gGeo.setAttribute('position', new THREE.BufferAttribute(gPos, 3));
+  gGeo.setAttribute('aColor',   new THREE.BufferAttribute(gCol, 3));
+  gGeo.setAttribute('aSize',    new THREE.BufferAttribute(gSize, 1));
+  gGeo.setAttribute('aPhase',   new THREE.BufferAttribute(gPhase, 1));
+
+  const puntosGalaxia = new THREE.Points(gGeo, matGalaxia);
+  const grupoGalaxia = new THREE.Group();
+  grupoGalaxia.add(puntosGalaxia);
+  grupoGalaxia.position.copy(CONFIG.GALAXIA_POS);
+  grupoGalaxia.rotation.x = deg2rad(CONFIG.GALAXIA_INCLINACION);
+  grupoGalaxia.rotation.z = deg2rad(-10);
+  grupoFondo.add(grupoGalaxia);
+
+  /* =================================================================================
+     CAMPO DE ESTRELLAS
+  ================================================================================= */
+  const ePos = new Float32Array(ESTRELLAS * 3);
+  const eCol = new Float32Array(ESTRELLAS * 3);
+  const eSize = new Float32Array(ESTRELLAS);
+  const ePhase = new Float32Array(ESTRELLAS);
+  const PALETA_ESTRELLAS = [new THREE.Color(0xffffff), new THREE.Color(0xcfe0ff), new THREE.Color(0xffe6b0)];
+
+  for (let i = 0; i < ESTRELLAS; i++) {
+    const i3 = i * 3;
+    const rad = 220 + Math.random() * 380;
+    const th = Math.random() * Math.PI * 2;
+    const ph = Math.acos(Math.random() * 2 - 1);
+    ePos[i3]   = rad * Math.sin(ph) * Math.cos(th);
+    ePos[i3+1] = rad * Math.cos(ph);
+    ePos[i3+2] = rad * Math.sin(ph) * Math.sin(th);
+    const c = PALETA_ESTRELLAS[(Math.random() * PALETA_ESTRELLAS.length) | 0];
+    eCol[i3] = c.r; eCol[i3+1] = c.g; eCol[i3+2] = c.b;
+    eSize[i]  = 0.8 + Math.random() * 1.8;
+    ePhase[i] = Math.random();
+  }
+  const eGeo = new THREE.BufferGeometry();
+  eGeo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+  eGeo.setAttribute('aColor',   new THREE.BufferAttribute(eCol, 3));
+  eGeo.setAttribute('aSize',    new THREE.BufferAttribute(eSize, 1));
+  eGeo.setAttribute('aPhase',   new THREE.BufferAttribute(ePhase, 1));
+  grupoFondo.add(new THREE.Points(eGeo, matEstrellas));
+
+  /* =================================================================================
+     ESTRELLAS BRILLANTES
+  ================================================================================= */
+  const texGlow = texturaGlow();
+  const estrellasBrillantes = [];
+  for (let i = 0; i < CONFIG.ESTRELLAS_BRILLANTES; i++) {
+    const rad = 260 + Math.random() * 320;
+    const th = Math.random() * Math.PI * 2;
+    const ph = Math.acos(Math.random() * 2 - 1);
+    const mat = new THREE.SpriteMaterial({
+      map: texGlow,
+      color: Math.random() < 0.6 ? 0xffffff : (Math.random() < 0.5 ? 0xcfe0ff : 0xffe6b0),
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      opacity: 0.9
+    });
+    const sp = new THREE.Sprite(mat);
+    const escala = 10 + Math.random() * 16;
+    sp.scale.set(escala, escala, escala);
+    sp.position.set(rad * Math.sin(ph) * Math.cos(th), rad * Math.cos(ph), rad * Math.sin(ph) * Math.sin(th));
+    grupoFondo.add(sp);
+    estrellasBrillantes.push({ sprite: sp, base: escala, fase: Math.random() * Math.PI * 2 });
+  }
+
+  /* =================================================================================
+     NEBULOSAS
+  ================================================================================= */
+  const nebulosas = [];
+  const TINTES_NEB = [0x7c3aed, 0xc026d3, 0x1e3a8a, 0x9b2c6f];
+  for (let i = 0; i < CONFIG.NEBULOSAS; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: texturaNebulosa(),
+      color: TINTES_NEB[i % TINTES_NEB.length],
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      opacity: 0.16 + Math.random() * 0.08
+    });
+    const sp = new THREE.Sprite(mat);
+    const escala = 160 + Math.random() * 160;
+    sp.scale.set(escala, escala * (0.7 + Math.random() * 0.5), escala);
+    sp.position.set((Math.random() - 0.5) * 320, (Math.random() - 0.5) * 200, -160 - Math.random() * 260);
+    sp.material.rotation = Math.random() * Math.PI * 2;
+    grupoFondo.add(sp);
+    nebulosas.push({ sprite: sp, base: escala, fase: Math.random() * Math.PI * 2, velRot: (Math.random() - 0.5) * 0.02 });
+  }
+
+  /* =================================================================================
+     ESTRELLAS FUGACES
+  ================================================================================= */
+  const METEORO_PARTICULAS = 12;
+  const meteorSprites = [];
+  for (let i = 0; i < METEORO_PARTICULAS; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: texturaPunto(true), color: 0xbfe0ff,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0
+    });
+    const sp = new THREE.Sprite(mat);
+    sp.visible = false;
+    grupoFondo.add(sp);
+    meteorSprites.push(sp);
+  }
+  const meteoro = {
+    activo: false, vida: 0, dur: 1.1, speed: 130,
+    head: new THREE.Vector3(), dir: new THREE.Vector3(1, -0.5, 0),
+    next: CONFIG.METEORO_MIN + Math.random() * (CONFIG.METEORO_MAX - CONFIG.METEORO_MIN)
+  };
+  function lanzarMeteoro() {
+    const s = Math.random() < 0.5 ? 1 : -1;
+    meteoro.head.set(-s * 185, 50 + Math.random() * 70, -40 - Math.random() * 90);
+    meteoro.dir.set(s, -0.4 + Math.random() * 0.25, -0.12).normalize();
+    meteoro.speed = 120 + Math.random() * 60;
+    meteoro.dur = 1.0 + Math.random() * 0.5;
+    meteoro.vida = 0;
+    meteoro.activo = true;
+    for (const sp of meteorSprites) sp.visible = true;
+    meteoro.next = CONFIG.METEORO_MIN + Math.random() * (CONFIG.METEORO_MAX - CONFIG.METEORO_MIN);
+  }
+
+  /* =================================================================================
+     CORAZÓN (curva clásica + perfil de cojín en Z)  —  partículas morphables
+  ================================================================================= */
+  const N = CONFIG.PUNTOS_CORAZON;
+  const nSup = Math.round(N * CONFIG.PROPORCION_SUPERFICIE);
+  const CX = 0, CY = -3;
+
+  const posH = new Float32Array(N * 3);   // posición del corazón (attribute 'position')
+  const colH = new Float32Array(N * 3);   // color del corazón
+  const norH = new Float32Array(N * 3);   // normal (para iluminación)
+  const bDir = new Float32Array(N * 3);   // dirección del estallido
+  const tPos = new Float32Array(N * 3);   // objetivo texto
+  const tCol = new Float32Array(N * 3);   // color del texto
+  const tSize = new Float32Array(N);
+  const tDelay = new Float32Array(N);
+  const tPhase = new Float32Array(N);
+  const tInterior = new Float32Array(N);
+  const tGlint = new Float32Array(N);
+  const tDust = new Float32Array(N);
+
+  const colA = new THREE.Color(CONFIG.COL_BASE_A);
+  const colB = new THREE.Color(CONFIG.COL_BASE_B);
+  const cTexA = new THREE.Color(CONFIG.COLOR_TEXTO_A);
+  const cTexB = new THREE.Color(CONFIG.COLOR_TEXTO_B);
+  const tmp = new THREE.Color();
+
+  function corazon2D(t) {
+    const s = Math.sin(t);
+    return [
+      16 * s * s * s,
+      13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)
+    ];
+  }
+  function perfilZ(u) { return CONFIG.GROSOR_CORAZON * Math.sqrt(Math.max(0, 1 - u*u)); }
+
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    const esSuperficie = i < nSup;
+    const u = clamp(Math.pow(Math.random(), 0.5), 0, 0.9999);
+    const t = Math.random() * Math.PI * 2;
+    const o = corazon2D(t);
+    const bx = CX + u * (o[0] - CX);
+    const by = CY + u * (o[1] - CY);
+    const zm = perfilZ(u);
+    const z = esSuperficie ? (Math.random() < 0.5 ? 1 : -1) * zm : (Math.random() * 2 - 1) * zm;
+
+    const nx = bx + (Math.random() - 0.5) * 0.30;
+    const ny = by + (Math.random() - 0.5) * 0.30;
+    const nz = z  + (Math.random() - 0.5) * 0.30;
+
+    posH[i3] = nx; posH[i3+1] = ny; posH[i3+2] = nz;
+    tPos[i3] = nx; tPos[i3+1] = ny; tPos[i3+2] = nz;   // provisional (hasta generar el texto)
+
+    const vx = nx - CX, vy = ny - CY, vz = nz;
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    norH[i3] = vx / vl; norH[i3+1] = vy / vl; norH[i3+2] = vz / vl;
+
+    const mag = (0.5 + Math.random()) * CONFIG.EXPLOSION_FUERZA;
+    bDir[i3]   = (vx / vl) * mag + (Math.random() - 0.5) * CONFIG.EXPLOSION_CAOS;
+    bDir[i3+1] = (vy / vl) * mag + (Math.random() - 0.5) * CONFIG.EXPLOSION_CAOS;
+    bDir[i3+2] = (vz / vl) * mag + (Math.random() - 0.5) * CONFIG.EXPLOSION_CAOS;
+
+    tmp.copy(colA).lerp(colB, Math.random());
+    colH[i3] = tmp.r; colH[i3+1] = tmp.g; colH[i3+2] = tmp.b;
+
+    tSize[i]     = CONFIG.TAMANO_PUNTO * (0.70 + Math.random() * 0.70) * (esSuperficie ? 1.0 : 0.85);
+    tDelay[i]    = Math.random();
+    tPhase[i]    = Math.random();
+    tInterior[i] = esSuperficie ? 0 : 1;
+    tGlint[i]    = (Math.random() < 0.02) ? 1 : 0;
+    tDust[i]     = 0;
+  }
+
+  const geoCorazon = new THREE.BufferGeometry();
+  geoCorazon.setAttribute('position',    new THREE.BufferAttribute(posH, 3));
+  geoCorazon.setAttribute('aColorHeart', new THREE.BufferAttribute(colH, 3));
+  geoCorazon.setAttribute('aNormal',     new THREE.BufferAttribute(norH, 3));
+  geoCorazon.setAttribute('aBurstDir',   new THREE.BufferAttribute(bDir, 3));
+  geoCorazon.setAttribute('aTextPos',    new THREE.BufferAttribute(tPos, 3));
+  geoCorazon.setAttribute('aColorText',  new THREE.BufferAttribute(tCol, 3));
+  geoCorazon.setAttribute('aSize',       new THREE.BufferAttribute(tSize, 1));
+  geoCorazon.setAttribute('aDelay',      new THREE.BufferAttribute(tDelay, 1));
+  geoCorazon.setAttribute('aPhase',      new THREE.BufferAttribute(tPhase, 1));
+  geoCorazon.setAttribute('aInterior',   new THREE.BufferAttribute(tInterior, 1));
+  geoCorazon.setAttribute('aGlint',      new THREE.BufferAttribute(tGlint, 1));
+  geoCorazon.setAttribute('aDust',       new THREE.BufferAttribute(tDust, 1));
+
+  const uniformsCorazon = {
+    uTime:       { value: 0 },
+    uPixelRatio: { value: renderer.getPixelRatio() },
+    uTexture:    { value: texturaPunto(false) },
+    uLightDir:   { value: CONFIG.LUZ_DIR.clone() },
+    uShadow:     { value: new THREE.Color(CONFIG.COL_SOMBRA) },
+    uCoral:      { value: new THREE.Color(CONFIG.COL_CORAL) },
+    uGlint:      { value: new THREE.Color(CONFIG.COL_GLINT) },
+    uMorph:      { value: 0 },
+    uBurst:      { value: 0 },
+    uSwirl:      { value: CONFIG.SWIRL },
+    uTextScale:  { value: 1 },
+    uTextMode:   { value: 0 },
+    uHover:      { value: 0 }
+  };
+
+  const corazonVert = `
+    uniform float uTime;
+    uniform float uPixelRatio;
+    uniform float uMorph;
+    uniform float uBurst;
+    uniform float uSwirl;
+    uniform float uTextScale;
+    uniform float uTextMode;
+    uniform float uHover;
+    uniform vec3  uLightDir;
+    uniform vec3  uShadow;
+    uniform vec3  uCoral;
+    uniform vec3  uGlint;
+    attribute vec3  aTextPos;
+    attribute vec3  aBurstDir;
+    attribute vec3  aColorHeart;
+    attribute vec3  aColorText;
+    attribute vec3  aNormal;
+    attribute float aSize;
+    attribute float aDelay;
+    attribute float aPhase;
+    attribute float aInterior;
+    attribute float aGlint;
+    attribute float aDust;
+    varying vec3  vColor;
+    varying float vAlpha;
+    void main() {
+      // Progreso local por partícula (enjambre con delay aleatorio)
+      float start = aDelay * 0.45;
+      float t = clamp((uMorph - start) / 0.55, 0.0, 1.0);
+      float e = t < 0.5 ? 4.0*t*t*t : 1.0 - pow(-2.0*t + 2.0, 3.0) * 0.5;
+
+      vec3 startPos = position + aBurstDir * uBurst;
+      vec3 objetivo = aTextPos * uTextScale;
+
+      // Remolino que se anula al llegar (magia, no línea recta)
+      vec3 swirl = vec3(
+          sin(aPhase * 6.2831 + e * 6.2831),
+          cos(aPhase * 5.1130 + e * 4.0),
+          sin(aPhase * 3.1416 + e * 3.1416)
+        ) * uSwirl * sin(3.14159265 * e);
+
+      vec3 pos = mix(startPos, objetivo, e) + swirl;
+
+      // Ondulación sutil del corazón
+      float und = sin(uTime * 1.5 + aPhase * 6.2831) * 0.06 * (1.0 - uTextMode);
+      pos += aNormal * und;
+
+      // Shimmer leve en estado texto
+      float shim = sin(uTime * 3.0 + aPhase * 20.0) * 0.05 * uTextMode;
+      pos.x += shim;
+      pos.y += shim * 0.6;
+
+      vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+
+      // Iluminación del corazón (se desvanece al convertirse en texto)
+      vec3 wn = normalize(mat3(modelMatrix) * aNormal);
+      float lit = max(dot(wn, normalize(uLightDir)), 0.0);
+      vec3 colH = mix(uShadow, aColorHeart, smoothstep(0.0, 0.45, lit));
+      colH = mix(colH, uCoral, smoothstep(0.50, 1.00, lit) * 0.90);
+      colH = mix(colH, uGlint, aGlint * smoothstep(0.78, 1.00, lit));
+      colH *= (1.0 - aInterior * 0.45);
+      float twinkle = 0.85 + 0.15 * sin(uTime * 2.0 + aPhase * 6.2831);
+      colH *= twinkle * (1.0 + uHover * 0.25);
+
+      // Color del texto: latido de brillo + shimmer
+      vec3 colT = aColorText * (1.0 + 0.10 * sin(uTime * 3.0));
+      colT *= (0.90 + 0.10 * sin(aPhase * 25.0 + uTime * 4.0));
+
+      vec3 col = mix(colH, colT, e);
+
+      vAlpha = mix(1.0, mix(1.0, 0.12, aDust), uTextMode);
+      vColor = col;
+
+      float sizeBoost = 1.0 + 0.30 * uTextMode;
+      gl_PointSize = aSize * sizeBoost * uPixelRatio * (300.0 / max(0.001, -mv.z)) * (0.92 + 0.08 * twinkle);
+      gl_Position = projectionMatrix * mv;
+    }
+  `;
+
+  const corazonFrag = `
+    uniform sampler2D uTexture;
+    varying vec3  vColor;
+    varying float vAlpha;
+    void main() {
+      float a = texture2D(uTexture, gl_PointCoord).a;
+      if (a < 0.03) discard;
+      gl_FragColor = vec4(vColor, a * vAlpha);
+    }
+  `;
+
+  const matCorazon = new THREE.ShaderMaterial({
+    uniforms: uniformsCorazon,
+    vertexShader: corazonVert,
+    fragmentShader: corazonFrag,
+    transparent: true,
+    depthWrite: true,
+    depthTest: true,
+    blending: THREE.NormalBlending
+  });
+
+  const puntosCorazon = new THREE.Points(geoCorazon, matCorazon);
+  puntosCorazon.frustumCulled = false;
+  const grupoCorazon = new THREE.Group();
+  grupoCorazon.add(puntosCorazon);
+  escena.add(grupoCorazon);
+
+  const esferaHover = new THREE.Mesh(
+    new THREE.SphereGeometry(CONFIG.RADIO_HOVER, 16, 16),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  escena.add(esferaHover);
+
+  /* =================================================================================
+     PUNTOS OBJETIVO DEL TEXTO (canvas + getImageData)
+  ================================================================================= */
+  async function generarObjetivosTexto() {
+    try { await document.fonts.load('700 150px "Dancing Script"'); } catch (err) {}
+    const W = 1024, H = 384;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = '#ffffff';
+    g.font = '700 150px "Dancing Script", cursive';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(CONFIG.TEXTO_FINAL, W / 2, H / 2);
+
+    let data;
+    try { data = g.getImageData(0, 0, W, H).data; }
+    catch (err) { return null; }
+
+    const xs = [], ys = [];
+    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (data[(y * W + x) * 4 + 3] > 128) {
+          xs.push(x); ys.push(y);
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+        }
+      }
+    }
+    const n = xs.length;
+    if (n === 0) return null;
+
+    const stride = n > CONFIG.MAX_TEXTO_PUNTOS ? Math.ceil(n / CONFIG.MAX_TEXTO_PUNTOS) : 1;
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    const escala = CONFIG.TEXTO_ANCHO / Math.max(1, (maxX - minX));
+
+    const tx = [], ty = [], tz = [], tu = [];
+    for (let k = 0; k < n; k += stride) {
+      const px = (xs[k] - cx) * escala;
+      const py = -(ys[k] - cy) * escala;
+      tx.push(px);
+      ty.push(py);
+      tz.push((Math.random() - 0.5) * 1.2);
+      tu.push(clamp((px / (CONFIG.TEXTO_ANCHO * 0.5)) * 0.5 + 0.5, 0, 1));
+    }
+    return { tx: tx, ty: ty, tz: tz, tu: tu, count: tx.length };
+  }
+
+  async function aplicarObjetivosTexto() {
+    const T = await generarObjetivosTexto();
+    if (!T) return;
+    for (let i = 0; i < N; i++) {
+      const i3 = i * 3;
+      if (i % 5 === 0) {
+        tDust[i] = 1;
+        tPos[i3]   = (Math.random() - 0.5) * CONFIG.TEXTO_ANCHO * 1.25;
+        tPos[i3+1] = (Math.random() - 0.5) * 15;
+        tPos[i3+2] = (Math.random() - 0.5) * 3.5;
+        tmp.copy(cTexA).lerp(cTexB, Math.random());
+      } else {
+        const ti = i % T.count;
+        tDust[i] = 0;
+        tPos[i3]   = T.tx[ti] + (Math.random() - 0.5) * 0.15;
+        tPos[i3+1] = T.ty[ti] + (Math.random() - 0.5) * 0.15;
+        tPos[i3+2] = T.tz[ti] + (Math.random() - 0.5) * 0.15;
+        tmp.copy(cTexA).lerp(cTexB, T.tu[ti]);
+      }
+      tCol[i3] = tmp.r; tCol[i3+1] = tmp.g; tCol[i3+2] = tmp.b;
+    }
+    geoCorazon.attributes.aTextPos.needsUpdate   = true;
+    geoCorazon.attributes.aColorText.needsUpdate = true;
+    geoCorazon.attributes.aDust.needsUpdate      = true;
+  }
+
+  /* =================================================================================
+     MINI CORAZONES
+  ================================================================================= */
+  const texMini = texturaCorazonSuave();
+  const miniCorazones = [];
+  for (let i = 0; i < CONFIG.MINI_CORAZONES; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: texMini, color: 0xff6b8a,
+      transparent: true, depthWrite: false, blending: THREE.NormalBlending, opacity: 0
+    });
+    const sp = new THREE.Sprite(mat);
+    sp.visible = false;
+    escena.add(sp);
+    miniCorazones.push({ sprite: sp, activo: false, vida: 0, dur: 1, vy: 0, drift: 0, freq: 0, fase: 0, escala: 1 });
+  }
+  function lanzarMiniCorazones() {
+    for (const m of miniCorazones) {
+      m.activo = true; m.vida = 0;
+      m.dur = 3.2 + Math.random() * 1.6;
+      m.vy = 6 + Math.random() * 6;
+      m.drift = 3 + Math.random() * 5;
+      m.freq = 0.8 + Math.random() * 1.4;
+      m.fase = Math.random() * Math.PI * 2;
+      m.escala = 2.6 + Math.random() * 3.0;
+      m.sprite.visible = true;
+      m.sprite.material.opacity = 0;
+      m.sprite.position.set((Math.random() - 0.5) * 48, -36 - Math.random() * 10, (Math.random() - 0.5) * 34);
+      m.sprite.scale.set(m.escala, m.escala, m.escala);
+    }
+  }
+
+  /* =================================================================================
+     MÁQUINA DE ESTADOS:
+     CORAZON -> APLASTAR -> ESTALLIDO -> A_TEXTO -> MANTENER -> A_CORAZON
+  ================================================================================= */
+  let estado = 'CORAZON';
+  let tEstado = 0;
+  let uMorph = 0, uBurst = 0, uTextMode = 0, intensidad = 0;
+  let miniLanzados = false;
+  const squash = { x: 1, y: 1, z: 1 };
+  let hoverTarget = 0, hoverActual = 0;
+  let parallaxX = 0, parallaxY = 0;
+  let beatFase = 0;
+
+  function activar() {
+    if (estado !== 'CORAZON') return;                 // ignora clics repetidos
+    let ry = grupoCorazon.rotation.y % (Math.PI * 2);
+    if (ry > Math.PI) ry -= Math.PI * 2;
+    if (ry < -Math.PI) ry += Math.PI * 2;
+    grupoCorazon.rotation.y = ry;
+    estado = 'APLASTAR';
+    tEstado = 0;
+    document.getElementById('pista').classList.add('oculto');
+  }
+
+  /* =================================================================================
+     INTERACCIÓN: HOVER + CLIC + PARALLAX
+  ================================================================================= */
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2(-2, -2);
+
+  function setNDC(clientX, clientY) {
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+    ndc.y = -((clientY - r.top) / r.height) * 2 + 1;
+  }
+  function sobreCorazon(clientX, clientY) {
+    setNDC(clientX, clientY);
+    raycaster.setFromCamera(ndc, camara);
+    return raycaster.intersectObject(esferaHover, false).length > 0;
+  }
+
+  // Estado del tap (clic limpio) y del arrastre (giro manual)
+  let tapActivo = false, tapId = -1;
+  let tapX = 0, tapY = 0, tapT = 0, tapUmbral = CONFIG.TAP_MAX_MOVIMIENTO;
+  let tapSobreCorazon = false, esArrastre = false;
+  let arrastrando = false;                 // lo activan los eventos de OrbitControls
+  let giroVel = CONFIG.VELOCIDAD_ROTACION; // velocidad actual del giro automático
+  let reanudarTimer = 0;                   // segundos restantes antes de reanudar el giro
+
+  // OrbitControls: saber cuándo el usuario está girando manualmente
+  controls.addEventListener('start', function () {
+    arrastrando = true;
+  });
+  controls.addEventListener('end', function () {
+    arrastrando = false;
+    reanudarTimer = CONFIG.REANUDAR_GIRO_MS / 1000;
+  });
+
+  window.addEventListener('pointermove', function (e) {
+    const sobre = sobreCorazon(e.clientX, e.clientY);
+    parallaxX = ndc.x;
+    parallaxY = ndc.y;
+    hoverTarget = sobre ? 1 : 0;
+    renderer.domElement.style.cursor = arrastrando ? 'grabbing' : (sobre ? 'grab' : 'default');
+
+    // Distancia desde el inicio del toque -> ¿es arrastre?
+    if (tapActivo && e.pointerId === tapId) {
+      const dist = Math.hypot(e.clientX - tapX, e.clientY - tapY);
+      if (dist > tapUmbral) esArrastre = true;
+    }
+  });
+
+  window.addEventListener('deviceorientation', function (e) {
+    if (e.gamma == null || e.beta == null) return;
+    parallaxX = clamp(e.gamma / 45, -1, 1);
+    parallaxY = clamp((e.beta - 45) / 45, -1, 1);
+  });
+
+  // pointerdown: solo guarda datos (NO dispara la secuencia)
+  window.addEventListener('pointerdown', function (e) {
+    tapActivo = true;
+    tapId = e.pointerId;
+    tapX = e.clientX;
+    tapY = e.clientY;
+    tapT = performance.now();
+    tapUmbral = (e.pointerType === 'touch') ? CONFIG.TAP_MAX_MOVIMIENTO_TACTIL : CONFIG.TAP_MAX_MOVIMIENTO;
+    esArrastre = false;
+    tapSobreCorazon = sobreCorazon(e.clientX, e.clientY);
+  });
+
+  // pointerup: dispara SOLO si fue un tap limpio sobre el corazón
+  window.addEventListener('pointerup', function (e) {
+    if (!tapActivo || e.pointerId !== tapId) return;
+    const dur = performance.now() - tapT;
+    const finSobre = sobreCorazon(e.clientX, e.clientY);
+    if (!esArrastre && dur < CONFIG.TAP_MAX_DURACION && tapSobreCorazon && finSobre && estado === 'CORAZON') {
+      activar();
+    }
+    tapActivo = false;
+    tapId = -1;
+    esArrastre = false;
+  });
+
+  // Cancelar el tap sin disparar nada
+  function cancelarTap() { tapActivo = false; tapId = -1; esArrastre = false; }
+  window.addEventListener('pointercancel', cancelarTap);
+  window.addEventListener('pointerleave', cancelarTap);
+
+  /* =================================================================================
+     BUCLE DE ANIMACIÓN
+  ================================================================================= */
+  const reloj = new THREE.Clock();
+
+  function animar() {
+    requestAnimationFrame(animar);
+
+    const dt = Math.min(reloj.getDelta(), 0.05);
+    const t  = reloj.elapsedTime;
+    tEstado += dt;
+
+    // --- Máquina de estados ---
+    switch (estado) {
+      case 'CORAZON':
+        squash.x = squash.y = squash.z = 1;
+        // Giro automático: se pausa al arrastrar y se reanuda gradualmente
+        if (arrastrando || esArrastre) {
+          giroVel = 0;
+          reanudarTimer = CONFIG.REANUDAR_GIRO_MS / 1000;
+        } else {
+          if (reanudarTimer > 0) reanudarTimer -= dt;
+          if (reanudarTimer <= 0) giroVel += (CONFIG.VELOCIDAD_ROTACION - giroVel) * Math.min(1, dt * 2);
+        }
+        grupoCorazon.rotation.y += dt * giroVel;
+        grupoCorazon.rotation.x = Math.sin(t * 0.45) * CONFIG.INCLINACION_X;
+        grupoCorazon.rotation.z = Math.sin(t * 0.32) * 0.03;
+        grupoCorazon.position.y = Math.sin(t * 0.6) * CONFIG.AMPLITUD_FLOTAR;
+        break;
+
+      case 'APLASTAR': {
+        const p = easeOutCubic(clamp(tEstado / CONFIG.F_APLASTAR, 0, 1));
+        squash.x = lerp(1, 1.25, p);
+        squash.y = lerp(1, 0.60, p);
+        squash.z = lerp(1, 1.25, p);
+        if (tEstado >= CONFIG.F_APLASTAR) { estado = 'ESTALLIDO'; tEstado = 0; }
+        break;
+      }
+
+      case 'ESTALLIDO': {
+        const k = clamp(tEstado / CONFIG.F_ESTALLIDO, 0, 1);
+        const e = easeOutElastic(k);
+        squash.x = lerp(1.25, 1, e);
+        squash.y = lerp(0.60, 1, e);
+        squash.z = lerp(1.25, 1, e);
+        uBurst = easeOutCubic(k);
+        if (tEstado >= CONFIG.F_ESTALLIDO) { estado = 'A_TEXTO'; tEstado = 0; }
+        break;
+      }
+
+      case 'A_TEXTO': {
+        const p = clamp(tEstado / CONFIG.F_A_TEXTO, 0, 1);
+        uMorph = p;
+        uTextMode = p;
+        const f = Math.min(1, dt * 3);
+        grupoCorazon.rotation.y += (0 - grupoCorazon.rotation.y) * f;
+        grupoCorazon.rotation.x += (0 - grupoCorazon.rotation.x) * f;
+        grupoCorazon.rotation.z += (0 - grupoCorazon.rotation.z) * f;
+        grupoCorazon.position.y += (0 - grupoCorazon.position.y) * f;
+        squash.x = squash.y = squash.z = 1;
+        if (tEstado >= CONFIG.F_A_TEXTO) { estado = 'MANTENER'; tEstado = 0; }
+        break;
+      }
+
+      case 'MANTENER':
+        uMorph = 1; uTextMode = 1; uBurst = 1;
+        grupoCorazon.rotation.set(0, 0, 0);
+        grupoCorazon.position.set(0, 0, 0);
+        squash.x = squash.y = squash.z = 1;
+        if (!miniLanzados) { lanzarMiniCorazones(); miniLanzados = true; }
+        if (tEstado >= CONFIG.F_MANTENER) { estado = 'A_CORAZON'; tEstado = 0; miniLanzados = false; }
+        break;
+
+      case 'A_CORAZON': {
+        const p = clamp(tEstado / CONFIG.F_A_CORAZON, 0, 1);
+        uMorph = 1 - p;
+        uTextMode = 1 - p;
+        uBurst = 1 - p;
+        squash.x = squash.y = squash.z = 1;
+        if (tEstado >= CONFIG.F_A_CORAZON) { estado = 'CORAZON'; tEstado = 0; }
+        break;
+      }
+    }
+
+    // --- Hover suavizado ---
+    hoverActual += (hoverTarget - hoverActual) * 0.08;
+    uniformsCorazon.uHover.value = hoverActual;
+
+    // --- Latido "lub-dub" (solo en estado corazón; acelera con hover) ---
+    let escalaPulso = 1;
+    if (estado === 'CORAZON') {
+      const vel = (1 / CONFIG.LATIDO_PERIODO) * (1 + hoverActual * 0.35);
+      beatFase = (beatFase + dt * vel) % 1;
+      const amp = CONFIG.LATIDO_AMPLITUD * (1 + hoverActual * 0.4);
+      const latido =
+        Math.exp(-Math.pow((beatFase - 0.08) / 0.10, 2)) +
+        0.55 * Math.exp(-Math.pow((beatFase - 0.30) / 0.10, 2));
+      escalaPulso = 1 + latido * amp;
+    }
+
+    grupoCorazon.scale.set(escalaPulso * squash.x, escalaPulso * squash.y, escalaPulso * squash.z);
+
+    // --- Bloom: se reduce durante el texto para que las letras sean nítidas ---
+    const objetivoBloom = (estado === 'A_TEXTO' || estado === 'MANTENER') ? CONFIG.BLOOM_TEXTO : CONFIG.BLOOM_FUERZA;
+    bloomPass.strength += (objetivoBloom - bloomPass.strength) * Math.min(1, dt * 4);
+
+    // --- "Extra" del estado texto: galaxia acelera y estrellas brillan más ---
+    const objetivoInt = (estado === 'MANTENER') ? 1 : 0;
+    intensidad += (objetivoInt - intensidad) * Math.min(1, dt * 3);
+
+    // --- Uniforms del corazón ---
+    uniformsCorazon.uTime.value = t;
+    uniformsCorazon.uMorph.value = uMorph;
+    uniformsCorazon.uBurst.value = uBurst;
+    uniformsCorazon.uTextMode.value = uTextMode;
+    uniformsCorazon.uTextScale.value = uTextScale;
+
+    // --- Galaxia ---
+    puntosGalaxia.rotation.y += dt * CONFIG.GIRO_GALAXIA * (1 + intensidad * 6);
+    matGalaxia.uniforms.uTime.value = t;
+    matEstrellas.uniforms.uTime.value = t;
+    matEstrellas.uniforms.uBrillo.value = 1.0 + intensidad * 0.7;
+
+    // --- Estrellas brillantes ---
+    for (const b of estrellasBrillantes) {
+      const p = 0.85 + 0.15 * Math.sin(t * 1.6 + b.fase);
+      const s = b.base * p * (1 + intensidad * 0.25);
+      b.sprite.scale.set(s, s, s);
+      b.sprite.material.opacity = 0.8 * p;
+    }
+
+    // --- Nebulosas ---
+    for (const nb of nebulosas) {
+      nb.sprite.material.rotation += nb.velRot * dt;
+      const p = 1 + 0.04 * Math.sin(t * 0.25 + nb.fase);
+      nb.sprite.scale.set(nb.base * p, nb.base * 0.8 * p, nb.base * p);
+      nb.sprite.material.opacity = (0.16 + 0.04 * (0.5 + 0.5 * Math.sin(t * 0.2 + nb.fase))) * (1 + intensidad * 0.3);
+    }
+
+    // --- Estrellas fugaces ---
+    if (meteoro.activo) {
+      meteoro.vida += dt;
+      const k = meteoro.vida / meteoro.dur;
+      if (k >= 1) {
+        meteoro.activo = false;
+        for (const sp of meteorSprites) sp.visible = false;
+      } else {
+        meteoro.head.addScaledVector(meteoro.dir, meteoro.speed * dt);
+        const fade = Math.sin(clamp(k, 0, 1) * Math.PI);
+        for (let i = 0; i < METEORO_PARTICULAS; i++) {
+          const fr = 1 - i / METEORO_PARTICULAS;
+          const sp = meteorSprites[i];
+          sp.position.copy(meteoro.head).addScaledVector(meteoro.dir, -i * 4.5);
+          sp.material.opacity = fade * fr * fr * 0.9;
+          const sc = (5 + 5 * fr) * (0.6 + 0.4 * fade);
+          sp.scale.set(sc, sc, sc);
+        }
+      }
+    } else {
+      meteoro.next -= dt;
+      if (meteoro.next <= 0) lanzarMeteoro();
+    }
+
+    // --- Parallax del fondo ---
+    grupoFondo.position.x += (parallaxX * 3 - grupoFondo.position.x) * 0.04;
+    grupoFondo.position.y += (parallaxY * 3 - grupoFondo.position.y) * 0.04;
+
+    // --- Mini corazones ---
+    for (const m of miniCorazones) {
+      if (!m.activo) continue;
+      m.vida += dt;
+      const k = m.vida / m.dur;
+      if (k >= 1) { m.activo = false; m.sprite.visible = false; continue; }
+      m.sprite.position.y += m.vy * dt;
+      m.sprite.position.x += Math.sin(m.vida * m.freq + m.fase) * m.drift * dt;
+      const fade = Math.sin(k * Math.PI);
+      m.sprite.material.opacity = fade * 0.85;
+      const s = m.escala * (0.7 + 0.3 * fade);
+      m.sprite.scale.set(s, s, s);
+      m.sprite.material.rotation = Math.sin(m.vida * 1.2 + m.fase) * 0.3;
+    }
+
+    controls.update();
+    composer.render();
+  }
+
+  /* =================================================================================
+     RESPONSIVE
+  ================================================================================= */
+  window.addEventListener('resize', function () {
+    const w = window.innerWidth, h = window.innerHeight;
+    const pr = Math.min(window.devicePixelRatio, 2);
+    camara.aspect = w / h;
+    camara.updateProjectionMatrix();
+    renderer.setPixelRatio(pr);
+    renderer.setSize(w, h);
+    composer.setPixelRatio(pr);
+    composer.setSize(w, h);
+    bloomPass.setSize(w, h);
+    uniformsCorazon.uPixelRatio.value = pr;
+    matGalaxia.uniforms.uPixelRatio.value = pr;
+    matEstrellas.uniforms.uPixelRatio.value = pr;
+    ajustarCamara();
+  });
+
+  /* =================================================================================
+     ARRANQUE
+  ================================================================================= */
+  ajustarCamara();
+  aplicarObjetivosTexto();
+  animar();
+  </script>
+</body>
+</html>
